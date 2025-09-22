@@ -7,11 +7,9 @@ This demo takes a webcam feed and automatically turns it into a clean and organi
 ## Features
 This project combines several components to deliver stable and natural framing.  
 
-It uses a YOLO face model for detection, paired with a lightweight IoU-based tracker to maintain consistent IDs across frames.  
-Faces are cropped into uniform portrait rectangles with headroom adjustments, then arranged automatically into one or two rows depending on group size.  
+It uses a YOLO face model for detection, paired with a lightweight IoU-based tracker to maintain consistent IDs across frames. Faces are cropped into uniform portrait rectangles with headroom adjustments, then arranged automatically into one or two rows depending on group size.  
 
-To reduce jitter, exponential moving average smoothing is applied to both bounding boxes and layout transitions.  
-MediaPipe’s Face Landmarker provides visual-only speaker detection, allowing the system to highlight the active speaker without relying on audio input.  
+To reduce jitter, exponential moving average smoothing is applied to both bounding boxes and layout transitions. MediaPipe’s Face Landmarker provides visual-only speaker detection, allowing the system to highlight the active speaker without relying on audio input.  
 
 ---
 
