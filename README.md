@@ -1,6 +1,6 @@
 # Smart Portrait Framing — Single Camera Demo Ver.
 
-This demo takes a webcam feed and automatically turns it into a clean and organized grid of cropped human portraits. It detects faces, tracks individuals over time, frames each person into a consistent aspect ratio, and highlights the active speakers in real time. The project aims to facilitate complex in-person group discussions where multiple people share a single computer, such as in study groups or classrooms.
+The smart portrait framing project series involves taking one or several camera feeds and automatically turning them into a clean and organized grid of cropped human portraits. It detects faces, tracks individuals over time, frames each person into a consistent aspect ratio, and highlights the active speakers in real time. This demonstration version aims to facilitate complex in-person group discussions where multiple people share a single computer, such as in study groups or classrooms.
 
 ---
 
