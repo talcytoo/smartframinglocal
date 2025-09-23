@@ -35,4 +35,24 @@ ASD_ON_THR = 0.15             # lip/jaw-open score threshold to turn ON “speak
 ASD_OFF_THR = 0.10            # score threshold to turn OFF “speaking”.
 ASD_EMA_ALPHA = 0.40          # ex moving avg, controls how much smoothing is applied to the raw lip/jaw-open signal.
 ASD_SUSTAIN = 8               # How many frames to “hold” speaking = True after a drop.
-SHOW_SPEAK_SCORE = True       # enable speak score hud
+SHOW_SPEAK_SCORE = False       # enable speak score hud
+
+# Panoramic mini-window
+PANO_ENABLED = True          # Enable/disable the panoramic preview window
+PANO_WIDTH = 480             # Width of the expanded panoramic window (px)
+PANO_HEIGHT = 270            # Height of the expanded panoramic window (px)
+PANO_COLLAPSED_H = 18        # Height when collapsed, showing only the arrow strip (px)
+PANO_MARGIN_BOTTOM = 24      # Distance from the bottom of the main frame (px)
+
+PANO_EXPAND_MS = 220         # Animation duration for expansion (milliseconds)
+PANO_COLLAPSE_MS = 160       # Animation duration for collapse (milliseconds)
+PANO_HOVER_RADIUS = 72       # Hover detection radius around the arrow to trigger expansion (px)
+PANO_AUTO_HIDE_SEC = 3.0     # Auto-collapse delay after hover ends (seconds)
+
+PANO_BORDER_PX = 2           # Thickness of the border around the panoramic window (px)
+PANO_RADIUS_PX = 10          # Corner radius for rounded edges (px)
+PANO_BG_COLOR = (24, 24, 24) # Background fill color (BGR)
+PANO_BORDER_COLOR = (64, 64, 64) # Border line color (BGR)
+PANO_ARROW_COLOR = (180, 180, 180) # Color of the collapse/expand arrow (BGR)
+PANO_SHADOW = True           # Whether to render a drop shadow behind the panoramic window
+
