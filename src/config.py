@@ -14,8 +14,8 @@ YOLO_DEVICE = "mps"                       # "cpu" or "cuda" (or "mps" on Apple S
 ASPECT_CANDIDATES = [(1,1), (2,3), (3,4)]
 
 # Grid policy
-MAX_CELLS_PER_FRAME = 12
-ONE_ROW_MAX = 4     # use 1 row up to this many people, else 2 rows
+MAX_VISIBLE_PORTRAITS = 4
+ONE_ROW_MAX = 4    # use 1 row up to this many people, else 2 rows
 MIN_FACE_PX = 45    # minimum face height (px) to accept a detection
 
 # Composition rules
