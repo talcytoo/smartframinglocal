@@ -133,28 +133,6 @@ def draw_reid_debug(canvas, reid, tracked_order, prefer_tid=None):
 
     return canvas
 
-def draw_static_pano_strip(canvas_bgr, full_frame_bgr, cfg: PanoConfig):
-    Hc, Wc = canvas_bgr.shape[:2]
-    ph = min(cfg.height, max(40, Hc // 3))
-    pw = min(cfg.width, Wc - 40)
-    x = (Wc - pw) // 2
-    y = Hc - cfg.margin_bottom - ph
-
-    cv.rectangle(canvas_bgr, (x, y), (x + pw, y + ph), cfg.bg_color, -1)
-    cv.rectangle(canvas_bgr, (x, y), (x + pw, y + ph), cfg.border_color, cfg.border_px)
-
-    fh, fw = full_frame_bgr.shape[:2]
-    if fw > 0 and fh > 0:
-        scale = min((pw - 8) / fw, (ph - 8) / fh)
-        rw = max(1, int(fw * scale))
-        rh = max(1, int(fh * scale))
-        mini = cv.resize(full_frame_bgr, (rw, rh), interpolation=cv.INTER_AREA)
-        x0 = x + (pw - rw) // 2
-        y0 = y + (ph - rh) // 2
-        canvas_bgr[y0:y0 + rh, x0:x0 + rw] = mini
-
-    return canvas_bgr
-
 def setup():
     cap = cv.VideoCapture(config.CAMERA_INDEX)
     if not cap.isOpened():
@@ -192,11 +170,8 @@ def setup():
     ))
 
     pano_cfg = build_pano_cfg()
-    pano_mode = getattr(config, "PANO_MODE", "overlay").lower()  # "overlay" or "framing"
-    if pano_mode not in ("overlay", "framing"):
-        pano_mode = "overlay"
 
-    rprint(f"[bold red]Smart Portrait Framing — v1.3[/]  [cyan]Pano mode: {pano_mode}[/]  toggle 'd' debug, cycle 'q'/'w', toggle pano mode 'm'")
+    rprint("[bold red]Smart Portrait Framing [/]  toggle 'd' debug, cycle 'q'/'w', toggle pano enable 'e'")
 
     win_name = "Smart Portrait Framing (Demo)"
     cv.namedWindow(win_name, cv.WINDOW_NORMAL | cv.WINDOW_GUI_EXPANDED)
@@ -220,10 +195,13 @@ def setup():
             rprint("[red]Camera read failed.[/]")
             break
 
+        # 1. Detect
         detections = detector.detect(frame)
 
+        # 2. Track
         ids = tracker.update([d["bbox"] for d in detections])
 
+        # 3. Smooth bboxes and attach track_id
         annotated = []
         for d, tid in zip(detections, ids):
             if tid is not None:
@@ -236,6 +214,7 @@ def setup():
 
         people_now = len([a for a in annotated if a.get("track_id") is not None])
 
+        # 4. Active speaker scoring
         speaking_map = {}
         open_score_map = {}
         H, W = frame.shape[:2]
@@ -258,6 +237,7 @@ def setup():
             speaking_map[tid] = bool(is_spk)
             open_score_map[tid] = float(score)
 
+        # 5. ReID bookkeeping
         cur_ids = {a['track_id'] for a in annotated if a.get('track_id') is not None}
         exited = prev_ids - cur_ids
         entered = cur_ids - prev_ids
@@ -282,6 +262,7 @@ def setup():
             if old_id is not None and old_id != tid:
                 id_remap[tid] = old_id
 
+        # 5.5 Cap visible portraits (MAX_VISIBLE_PORTRAITS)
         CAP = int(getattr(config, "MAX_VISIBLE_PORTRAITS",
                           getattr(config, "MAX_CELLS_PER_FRAME", 12)))
 
@@ -308,22 +289,16 @@ def setup():
 
         ranked.sort(key=lambda t: -t[1])
         keep_tids = {tid for tid, _ in ranked[:CAP]} if CAP > 0 else {tid for tid, _ in ranked}
-
         annotated = [a for a in annotated if a.get("track_id") in keep_tids]
         people_now = len(annotated)
 
-        # If pano_mode == "framing", reserve a bottom strip and plan the layout above it
-        reserve_h = 0
-        if pano_mode == "framing" and pano_cfg.enabled:
-            reserve_h = min(pano_cfg.height + pano_cfg.margin_bottom, config.OUTPUT_H // 3)
-
+        # 6. Layout → animation → compose
         if people_now > 0:
             rows_hint_local = use_rows_hint
-            target_h = max(1, config.OUTPUT_H - reserve_h)
             plan = plan_layout_and_crops(
                 frame,
                 annotated,
-                (config.OUTPUT_W, target_h),
+                (config.OUTPUT_W, config.OUTPUT_H),
                 config.ASPECT_CANDIDATES[aspect_idx],
                 config.ONE_ROW_MAX,
                 config.HEADROOM_RATIO,
@@ -331,6 +306,7 @@ def setup():
                 rows_hint_local
             )
 
+            # spawn shrink for new ids
             if last_plan and people_now > last_people:
                 prev_ids_in_plan = {s.get("track_id") for s in last_plan["slots"] if s.get("track_id") is not None}
                 cur_ids_in_plan = {s.get("track_id") for s in plan["slots"] if s.get("track_id") is not None}
@@ -342,6 +318,7 @@ def setup():
                             x, y, w, h = s["slot_xywh"]
                             s["slot_xywh"] = shrink_slot_rect(x, y, w, h, SPAWN_SHRINK)
 
+            # apply ID remap before compose
             if id_remap:
                 for s in plan.get('slots', []):
                     tid = s.get('track_id')
@@ -349,16 +326,9 @@ def setup():
                         s['track_id'] = id_remap[tid]
 
             plan = anim.update(plan, dt=time.time() - t0)
+            canvas, _ = compose_canvas(frame, plan)
 
-            # Compose into top area (if reserving, we’ll paste into the top region later)
-            canvas_top, _ = compose_canvas(frame, plan)
-
-            if reserve_h > 0:
-                canvas = np.zeros((config.OUTPUT_H, config.OUTPUT_W, 3), dtype=np.uint8)
-                canvas[:config.OUTPUT_H - reserve_h, :, :] = canvas_top
-            else:
-                canvas = canvas_top
-
+            # speaker overlay
             for s in plan.get("slots", []):
                 tid = s.get("track_id")
                 if tid is None:
@@ -382,22 +352,17 @@ def setup():
             last_people = 0
             canvas = cv.resize(frame, (config.OUTPUT_W, config.OUTPUT_H))
 
-        # Pano behavior
-        if pano_mode == "overlay":
-            if speaking_map and pano is not None:
-                pano.notify_activity(any(speaking_map.values()))
-            if pano is None:
-                pano = PanoWindow(canvas.shape[1], canvas.shape[0], pano_cfg)
-            else:
-                pano.set_canvas_size(canvas.shape[1], canvas.shape[0])
-            pano.set_mouse(mouse.x, mouse.y)
-            canvas = pano.update_and_draw(canvas, frame)
+        # 7. Pano overlay (enable/disable with 'e')
+        if speaking_map and pano is not None:
+            pano.notify_activity(any(speaking_map.values()))
+        if pano is None:
+            pano = PanoWindow(canvas.shape[1], canvas.shape[0], pano_cfg)
         else:
-            # Pano as part of framing: draw a fixed strip in the reserved bottom area
-            if pano_cfg.enabled:
-                canvas = draw_static_pano_strip(canvas, frame, pano_cfg)
+            pano.set_canvas_size(canvas.shape[1], canvas.shape[0])
+        pano.set_mouse(mouse.x, mouse.y)
+        canvas = pano.update_and_draw(canvas, frame)
 
-        # ReID debug panel (toggle 'd', cycle 'q' and 'w')
+        # 8. ReID debug panel (toggle 'd', cycle 'q' and 'w')
         tracked_order = tracked_list_from_plan(last_plan)
         prefer_tid = next((tid for tid, v in speaking_map.items() if v), None)
         canvas = draw_reid_debug(canvas, reid, tracked_order, prefer_tid)
@@ -418,10 +383,12 @@ def setup():
                            cv.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv.LINE_AA)
         """
 
+        # 9. HUD and present
         dt = time.time() - t0
         fps = 1.0 / max(dt, 1e-3)
         fps_hist = (fps_hist + [fps])[-30:]
-        hud_text = f"People: {people_now}  FPS: {np.mean(fps_hist):.1f}  Pano:{pano_mode}"
+        hud_text = f"People: {people_now}  FPS: {np.mean(fps_hist):.1f}"
+        # show cap hint if capped
         if len(cur_ids) > people_now and people_now == min(len(cur_ids), CAP):
             hud_text += "  (capped)"
         hud = canvas.copy()
@@ -435,10 +402,6 @@ def setup():
         if key == ord('e'):
             pano_cfg.enabled = not pano_cfg.enabled
             rprint(f"[yellow]Pano enabled: {pano_cfg.enabled}[/]")
-        if key == ord('r'):
-            pano_mode = "framing" if pano_mode == "overlay" else "overlay"
-            pano = None
-            rprint(f"[yellow]Pano mode switched to: {pano_mode}[/]")
         if key == ord('d'):
             REID_STATE["show"] = not REID_STATE["show"]
             if not REID_STATE["show"]:
