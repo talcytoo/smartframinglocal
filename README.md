@@ -1,6 +1,6 @@
 # Smart Portrait Framing (DTEN Design Proposal)
 
-This project involves taking one or several camera feeds and automatically turning them into a clean and organized grid of cropped human portraits. It detects faces, tracks individuals over time, frames each person into a consistent aspect ratio, and highlight the active speakers in real time. This demonstration version is a design proposal demo for DTEN, aiming to facilitate complex in-person group discussions where multiple people share a single device, such as in study groups, classrooms, or conference rooms. 
+This project involves taking one or several camera feeds and automatically turning them into a clean and organized grid of cropped human portraits. It detects faces, tracks individuals over time, frames each person into a consistent aspect ratio, and highlights active speakers in real-time. This demonstration version is a design proposal demo for DTEN, aiming to facilitate complex in-person group discussions where multiple people share a single device, such as in study groups, classrooms, or conference rooms. 
 
 ---
 
@@ -9,9 +9,9 @@ This project combines several components to deliver stable and natural framing.
 
 It uses a YOLO face model for detection, paired with a lightweight IoU-based tracker to maintain consistent IDs across frames. Faces are cropped into uniform portrait rectangles with headroom adjustments, then arranged automatically into one or two rows depending on group size.  
 
-To reduce jitter, exponential moving average smoothing is applied to both bounding boxes and layout transitions. MediaPipe’s Face Landmarker provides visual-only speaker detection, allowing the system to highlight the active speakers without relying on audio input.  
+To reduce jitter, exponential moving average smoothing is applied to both bounding boxes and layout transitions. MediaPipe’s Face Landmarker provides visual-only speaker detection, enabling the system to highlight active speakers without relying on audio input.  
 
-Additional features include a collapsible panoramic mini-window that displays the entire camera view and short-term face re-identification, which enables the recognition of individuals who briefly leave and return with the same ID.  
+Additional features include a collapsible panoramic mini-window that displays the entire camera view, an optional embed mode where the panoramic window becomes part of the layout alongside portraits, and short-term face re-identification, which enables the recognition of individuals who briefly leave and return with the same ID.  
 
 ---
 
@@ -24,7 +24,8 @@ Additional features include a collapsible panoramic mini-window that displays th
 6. A layout planner assigns people to portrait slots based on count and aspect ratio.  
 7. The system composites the portraits, draws highlights for speakers, and overlays relevant HUD info.  
 8. The panoramic mini-window shows the full camera view, expanding on hover and collapsing when idle.  
-9. Short-term re-identification links new detections with recently exited tracks if they return quickly.  
+9. In embed mode, the panoramic view is included in the framing grid as a dedicated slot beneath portraits.  
+10. Short-term re-identification links new detections with recently exited tracks if they return quickly.  
 
 ---
 ## Getting Started
@@ -48,4 +49,5 @@ python -m src.main
 ```
 
 ### (Optional) Debug toggle
-During runtime, press d to toggle the ReID debug panel, and use q/w to cycle through tracked IDs.
+During runtime, press d to toggle the ReID debug panel, and use q/w to cycle through tracked IDs. 
+You can also press e to enable/disable the panoramic window and r to toggle between overlay (default) and embed modes.
