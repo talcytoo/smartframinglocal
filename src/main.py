@@ -344,7 +344,7 @@ def setup():
         if people_now > 0:
             rows_hint_local = 1 if pano_mode == "embed" else use_rows_hint
             if pano_mode == "embed":
-                aspect_for_plan = getattr(config, "FRAMING_PORTRAIT_ASPECT", (4, 5))
+                aspect_for_plan = getattr(config, "FRAMING_PORTRAIT_ASPECT", (9, 16))
             else:
                 aspect_for_plan = config.ASPECT_CANDIDATES[aspect_idx]
 
