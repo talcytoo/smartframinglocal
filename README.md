@@ -116,7 +116,7 @@ All parameters are in `src/config.py`. Key settings:
 - Portraits are ranked by speaking status, face area, and centre bias; the top N are kept
 - A layout planner assigns each person to a grid slot with uniform crop sizing and headroom
 - Layout transitions are animated with exponential decay for smooth motion
-- The panoramic mini-window shows the full camera view — hover to expand, or use embed mode
+- The panoramic mini-window shows the full camera view: hover to expand, or use embed mode
 - Short-term face re-identification links returning individuals to their previous track ID
 
 ## References
