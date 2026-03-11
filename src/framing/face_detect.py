@@ -6,16 +6,11 @@ from .. import config
 
 
 class FaceDetector:
-    # YOLO-based face detector (Ultralytics).
-    # Expects a face-specific YOLO model (e.g., yolov8n-face.pt).
-    # Returns dicts with "bbox", "score", and optional "keypoints".
     def __init__(self, min_face_px: int = 45):
         self.min_face_px = min_face_px
 
-        # Load YOLO model
         self.model = YOLO(config.YOLO_WEIGHTS)
 
-        # Runtime params
         self.conf = getattr(config, "YOLO_CONF", 0.35)
         self.iou = getattr(config, "YOLO_IOU", 0.5)
         self.imgsz = getattr(config, "YOLO_IMG_SIZE", 640)
@@ -23,7 +18,6 @@ class FaceDetector:
 
     @staticmethod
     def _xyxy_to_xywh(box: np.ndarray) -> Tuple[int, int, int, int]:
-        # Convert xyxy box to xywh
         x1, y1, x2, y2 = box
         x, y = int(x1), int(y1)
         w, h = int(x2 - x1), int(y2 - y1)
@@ -32,7 +26,6 @@ class FaceDetector:
     def detect(self, frame_bgr: np.ndarray) -> List[Dict]:
         H, W = frame_bgr.shape[:2]
 
-        # Run YOLO inference
         results = self.model.predict(
             source=frame_bgr,
             conf=self.conf,
@@ -51,10 +44,9 @@ class FaceDetector:
         if boxes is None or len(boxes) == 0:
             return out
 
-        # Extract keypoints if available
         kp_obj = getattr(r, "keypoints", None)
         has_kp = kp_obj is not None and getattr(kp_obj, "xy", None) is not None
-        kps = kp_obj.xy.cpu().numpy() if has_kp else None  # (N, K, 2)
+        kps = kp_obj.xy.cpu().numpy() if has_kp else None
 
         xyxy = boxes.xyxy.cpu().numpy()
         confs = boxes.conf.cpu().numpy()
@@ -68,7 +60,6 @@ class FaceDetector:
             keypoints = {}
 
             if has_kp and i < len(kps):
-                # Map common 5-keypoint format
                 pts = kps[i]
                 keypoints = {
                     "right_eye": (float(pts[0, 0]), float(pts[0, 1])),

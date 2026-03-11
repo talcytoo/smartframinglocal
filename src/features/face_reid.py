@@ -4,7 +4,6 @@ import time
 import numpy as np
 import cv2 as cv
 
-# MediaPipe Tasks (Face Landmarker)
 import mediapipe as mp
 
 
@@ -12,17 +11,14 @@ import mediapipe as mp
 class ReIDConfig:
     model_asset_path: str = 'models/face_landmarker.task'
     max_faces: int = 1
-    running_mode: str = 'IMAGE'   # 'IMAGE' or 'VIDEO'
-    reid_window_sec: float = 5.0  # how long an exited ID stays matchable
-    sim_threshold: float = 0.18   # cosine distance threshold (lower = more similar)
-    lmk_norm: bool = True         # normalize landmark coords within ROI
-    use_blendshapes: bool = True  # include 52 blendshape scores in embedding
+    running_mode: str = 'IMAGE'
+    reid_window_sec: float = 5.0
+    sim_threshold: float = 0.18
+    lmk_norm: bool = True
+    use_blendshapes: bool = True
 
 
 class FaceReID:
-    # Lightweight short-horizon re-identification for meeting UX continuity.
-    # Embedding = [blendshapes (optional) | compact geometry metrics], cosine distance.
-    # Keeps a recent-exits gallery and remaps new IDs to old IDs if similar.
 
     def __init__(self, cfg: ReIDConfig):
         self.cfg = cfg
@@ -44,20 +40,13 @@ class FaceReID:
         )
         self._landmarker = mp.tasks.vision.FaceLandmarker.create_from_options(self._options)
 
-        # Recent exits gallery: list[(track_id, t_exit, embedding)]
         self._gallery: list[tuple[int, float, np.ndarray]] = []
-        # Cache of latest embeddings for active tracks: tid -> emb
         self._last_embeds: dict[int, np.ndarray] = {}
-        # Alias mapping: new_tid -> canonical old_tid
         self._alias: dict[int, int] = {}
 
-        # Debug caches
-        # tid -> {'pts': Nx3, 'bs_scores': ndarray|None, 'bs_labels': list[str]|None}
         self._last_debug: dict[int, dict] = {}
-        # new_tid -> {'old': int, 'dist': float, 't': float}
         self._last_match: dict[int, dict] = {}
 
-    # Public API
 
     def clear(self):
         self._gallery.clear()
@@ -67,26 +56,22 @@ class FaceReID:
         self._last_match.clear()
 
     def canonical_id(self, tid: int) -> int:
-        # Resolve a track id through alias chain to its canonical id (cycle-safe).
         visited = []
         cur = tid
         seen = set()
         while cur in self._alias:
             if cur in seen:
-                # Break cycle conservatively by removing the last edge encountered.
                 self._alias.pop(cur, None)
                 break
             seen.add(cur)
             visited.append(cur)
             cur = self._alias[cur]
-        # Path compression
         for v in visited:
             if v != cur:
                 self._alias[v] = cur
         return cur
 
     def note_exit(self, tid: int):
-        # Call when a track disappears this frame to store its embedding in the gallery.
         t_now = time.time()
         self._prune_gallery(t_now)
         emb = self._last_embeds.get(tid)
@@ -96,8 +81,6 @@ class FaceReID:
                 self._gallery = self._gallery[-16:]
 
     def try_reassign(self, new_tid: int) -> int | None:
-        # Map a newly appeared track ID to a recently exited ID using cosine distance.
-        # Returns the canonical old_id if matched; None otherwise. Cycle-safe.
         t_now = time.time()
         self._prune_gallery(t_now)
 
@@ -105,7 +88,6 @@ class FaceReID:
         if emb is None or not self._gallery:
             return None
 
-        # Nearest neighbor in gallery
         best_old = None
         best_dist = 1e9
         for old_tid, t_exit, old_emb in self._gallery:
@@ -121,26 +103,21 @@ class FaceReID:
         new_canon = self.canonical_id(new_tid)
 
         if new_canon == old_canon:
-            # Equivalent already; drop the matched gallery entry
             self._gallery = [(tid, t, e) for (tid, t, e) in self._gallery if tid != best_old]
             self._last_match[new_tid] = {'old': old_canon, 'dist': best_dist, 't': t_now}
             return old_canon
 
-        # Avoid alias cycles: do not create mapping that makes old_canon resolve to new_tid
         if self.canonical_id(old_canon) == new_tid:
             return None
 
-        # Alias new_tid -> old_canon
         self._alias[new_tid] = old_canon
-        _ = self.canonical_id(new_tid)  # compress
+        _ = self.canonical_id(new_tid)
 
-        # Remove matched gallery entry and record debug
         self._gallery = [(tid, t, e) for (tid, t, e) in self._gallery if tid != best_old]
         self._last_match[new_tid] = {'old': old_canon, 'dist': best_dist, 't': t_now}
         return old_canon
 
     def update_track_embedding(self, tid: int, roi_bgr: np.ndarray):
-        # Compute and cache embedding for a track ROI. Also record debug payload.
         if roi_bgr is None or roi_bgr.size == 0:
             return
 
@@ -152,12 +129,10 @@ class FaceReID:
         if not res.face_landmarks:
             return
 
-        # 468/478 landmarks (x,y,z)
         pts = np.array([[p.x, p.y, getattr(p, 'z', 0.0)] for p in res.face_landmarks[0]],
                        dtype=np.float32)
 
         if self.cfg.lmk_norm:
-            # Normalize XY to [0,1] within ROI; center/scale Z
             xy = pts[:, :2]
             xy = (xy - xy.min(axis=0)) / np.clip((xy.max(axis=0) - xy.min(axis=0)), 1e-6, None)
             z = pts[:, 2:3]
@@ -178,10 +153,9 @@ class FaceReID:
         else:
             emb = geom
 
-        emb = emb / max(np.linalg.norm(emb), 1e-6)  # L2 normalize
+        emb = emb / max(np.linalg.norm(emb), 1e-6)
         self._last_embeds[tid] = emb
 
-        # Debug payload for visualization
         self._last_debug[tid] = {
             'pts': pts_n,
             'bs_scores': bs_scores,
@@ -189,21 +163,16 @@ class FaceReID:
         }
 
     def get_debug(self, tid: int) -> dict | None:
-        # Return latest debug payload for this track id.
         return self._last_debug.get(tid)
 
     def get_last_match_info(self, tid: int) -> dict | None:
-        # Return last re-ID match info for this new track id (if any).
         return self._last_match.get(tid)
 
-    # Internals
 
     def _prune_gallery(self, t_now: float):
         win = float(self.cfg.reid_window_sec)
         self._gallery = [(tid, t, e) for (tid, t, e) in self._gallery if (t_now - t) <= win]
 
-
-# Helpers
 
 def cosine_distance(a: np.ndarray, b: np.ndarray) -> float:
     denom = (np.linalg.norm(a) * np.linalg.norm(b))
@@ -214,8 +183,6 @@ def cosine_distance(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def geometry_feats_from_landmarks(pts: np.ndarray) -> np.ndarray:
-    # Small, robust geometry vector from normalized landmarks.
-    # Distances/ratios (mouth gap, eye aspect, nose–eyes) and z mean/std.
     idx = {
         'lip_up': 13, 'lip_lo': 14,
         'le_up': 159, 'le_lo': 145,
@@ -233,7 +200,6 @@ def geometry_feats_from_landmarks(pts: np.ndarray) -> np.ndarray:
     nose = safe(idx['nose'])
     le_outer = safe(idx['le_outer']); re_outer = safe(idx['re_outer'])
 
-    # Distances in xy
     mouth_gap = np.linalg.norm(lu[:2] - ll[:2])
     le_aspect = np.linalg.norm(leu[:2] - lel[:2])
     re_aspect = np.linalg.norm(reu[:2] - rel[:2])
@@ -241,7 +207,6 @@ def geometry_feats_from_landmarks(pts: np.ndarray) -> np.ndarray:
     eyes_center = 0.5 * (le_outer[:2] + re_outer[:2])
     nose_eyes = np.linalg.norm(nose[:2] - eyes_center)
 
-    # Ratios (scale-invariant) + Z stats
     v = np.array([
         mouth_gap / eye_span,
         le_aspect / eye_span,

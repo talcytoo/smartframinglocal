@@ -1,4 +1,3 @@
-# src/main.py
 import cv2 as cv
 import numpy as np
 import time
@@ -16,18 +15,19 @@ from .ui.pano_window import PanoWindow, PanoConfig
 from .ui.mouse import MouseState
 from . import config
 
-# Adjustable parameters
+from .camera.dualcamstitch import DualCamStitcher, DualCamConfig
+from .camera.face_dedup import deduplicate_overlap_faces
+
 SMOOTH_ALPHA = getattr(config, "SMOOTH_ALPHA", 0.35)
 SPAWN_SHRINK = getattr(config, "SPAWN_SHRINK", 0.82)
 BORDER_THICK = 6
-SPEAKER_BORDER_COLOR = (80, 220, 80)  # BGR
+SPEAKER_BORDER_COLOR = (80, 220, 80)
 NON_SPEAKER_BORDER_COLOR = None
 SHOW_SPEAK_SCORE = getattr(config, "SHOW_SPEAK_SCORE", True)
 
-# ReID debug panel state and tuning
 REID_STATE = {
-    "show": False,     # toggle with 'd'
-    "focus_tid": None, # cycle with 'q' / 'w'
+    "show": False,
+    "focus_tid": None,
 }
 REID_DEBUG_PANEL_W = 240
 REID_DEBUG_PANEL_H = 240
@@ -175,10 +175,41 @@ def compute_viewport_y(plan, output_h: int, visible_h: int) -> int:
     y0 = max(0, min(y0, output_h - visible_h))
     return y0
 
+def _build_dual_cam_cfg() -> DualCamConfig:
+    return DualCamConfig(
+        cam0_index=getattr(config, 'DCS_CAM0', 0),
+        cam1_index=getattr(config, 'DCS_CAM1', 1),
+        width=getattr(config, 'DCS_W', 1280),
+        height=getattr(config, 'DCS_H', 720),
+        fps=getattr(config, 'DCS_FPS', 30),
+        max_features=getattr(config, 'DCS_MAX_FEATURES', 1500),
+        ratio=getattr(config, 'DCS_RATIO', 0.75),
+        min_agree=getattr(config, 'DCS_MIN_AGREE', 20),
+        windowed=getattr(config, 'DCS_WINDOWED', False),
+        window_frac=getattr(config, 'DCS_WINDOW_FRAC', 0.5),
+        smooth_alpha=getattr(config, 'DCS_SMOOTH_ALPHA', 0.2),
+        auto_seam=getattr(config, 'DCS_AUTO_SEAM', True),
+        seam_frac=getattr(config, 'DCS_SEAM_FRAC', 0.5),
+        blend_width=getattr(config, 'DCS_BLEND_WIDTH', 10),
+        color_correct=getattr(config, 'DCS_COLOR_CORRECT', True),
+        cc_strength=getattr(config, 'DCS_CC_STRENGTH', 0.8),
+        recalc_every=getattr(config, 'DCS_RECALC_EVERY', 1),
+    )
+
 def setup():
-    cap = cv.VideoCapture(config.CAMERA_INDEX)
-    if not cap.isOpened():
-        raise RuntimeError(f"Cannot open camera index {config.CAMERA_INDEX}")
+    use_dual = getattr(config, 'DCS_ENABLED', False)
+
+    stitcher = None
+    cap = None
+    if use_dual:
+        dc_cfg = _build_dual_cam_cfg()
+        stitcher = DualCamStitcher(dc_cfg)
+        stitcher.start()
+        rprint("[bold cyan]Dual-cam stitch mode ON[/]")
+    else:
+        cap = cv.VideoCapture(config.CAMERA_INDEX)
+        if not cap.isOpened():
+            raise RuntimeError(f"Cannot open camera index {config.CAMERA_INDEX}")
 
     detector = FaceDetector(min_face_px=config.MIN_FACE_PX)
     tracker = StableTracker(
@@ -210,13 +241,15 @@ def setup():
     ))
 
     pano_cfg = build_pano_cfg()
-    pano_mode = "overlay"  # default mode: "overlay" or "embed"
+    pano_mode = "embed"
 
-    rprint("[bold red]Smart Portrait Framing — v1.3[/]  toggle 'd' debug, cycle 'q'/'w', toggle pano enable 'e', toggle mode 'r' (overlay/embed)")
+    mode_tag = " [dual-cam]" if use_dual else ""
+    rprint(f"[bold red]Smart Portrait Framing — v1.4{mode_tag}[/]  toggle 'd' debug, cycle 'q'/'w', toggle pano enable 'e', toggle mode 'r' (overlay/embed)")
 
     win_name = "Smart Portrait Framing (Demo)"
     cv.namedWindow(win_name, cv.WINDOW_NORMAL | cv.WINDOW_GUI_EXPANDED)
     cv.resizeWindow(win_name, config.OUTPUT_W, config.OUTPUT_H)
+    cv.moveWindow(win_name, 0, 0)
 
     mouse = MouseState()
     cv.setMouseCallback(win_name, mouse.callback)
@@ -233,18 +266,36 @@ def setup():
 
     while True:
         t0 = time.time()
-        ok, frame = cap.read()
-        if not ok:
-            rprint("[red]Camera read failed.[/]")
-            break
 
-        # 1. Detect
+        if use_dual:
+            ok, frame = stitcher.read()
+        else:
+            ok, frame = cap.read()
+        if not ok:
+            if not use_dual:
+                rprint("[red]Camera read failed.[/]")
+                break
+            time.sleep(0.005)
+            continue
+
         detections = detector.detect(frame)
 
-        # 2. Track
+        if use_dual and stitcher.has_dx:
+            dedup_iou = getattr(config, 'DCS_DEDUP_IOU', 0.15)
+            dedup_dx = getattr(config, 'DCS_DEDUP_MAX_DX', 80.0)
+            os_, oe = stitcher.overlap_range
+            detections = deduplicate_overlap_faces(
+                detections,
+                stitch_dx=stitcher.dx,
+                cam_width=stitcher.cam_width,
+                overlap_start=os_,
+                overlap_end=oe,
+                iou_thr=dedup_iou,
+                max_center_dx=dedup_dx,
+            )
+
         ids = tracker.update([d["bbox"] for d in detections])
 
-        # 3. Smooth bboxes and attach track_id
         annotated = []
         for d, tid in zip(detections, ids):
             if tid is not None:
@@ -257,7 +308,6 @@ def setup():
 
         people_now_raw = len([a for a in annotated if a.get("track_id") is not None])
 
-        # 4. Active speaker scoring
         speaking_map = {}
         open_score_map = {}
         H, W = frame.shape[:2]
@@ -278,7 +328,6 @@ def setup():
             speaking_map[tid] = bool(is_spk)
             open_score_map[tid] = float(score)
 
-        # 5. ReID bookkeeping
         cur_ids = {a['track_id'] for a in annotated if a.get('track_id') is not None}
         exited = prev_ids - cur_ids
         entered = cur_ids - prev_ids
@@ -303,7 +352,6 @@ def setup():
             if old_id is not None and old_id != tid:
                 id_remap[tid] = old_id
 
-        # 5.5 Cap visible portraits
         CAP_default = int(getattr(config, "MAX_VISIBLE_PORTRAITS",
                                   getattr(config, "MAX_CELLS_PER_FRAME", 12)))
         CAP = CAP_default
@@ -333,7 +381,6 @@ def setup():
         annotated = [a for a in annotated if a.get("track_id") in keep_tids]
         people_now = len(annotated)
 
-        # 6. Layout → animation → compose
         reserve_h = 0
         if pano_mode == "embed" and pano_cfg.enabled:
             ideal_ph = int(config.OUTPUT_W / 2.5)
@@ -348,10 +395,11 @@ def setup():
             else:
                 aspect_for_plan = config.ASPECT_CANDIDATES[aspect_idx]
 
+            layout_h = config.OUTPUT_H - reserve_h if pano_mode == "embed" and reserve_h > 0 else config.OUTPUT_H
             plan = plan_layout_and_crops(
                 frame,
                 annotated,
-                (config.OUTPUT_W, config.OUTPUT_H),
+                (config.OUTPUT_W, layout_h),
                 aspect_for_plan,
                 config.ONE_ROW_MAX,
                 config.HEADROOM_RATIO,
@@ -382,21 +430,19 @@ def setup():
 
             if pano_mode == "embed" and reserve_h > 0:
                 top_h = max(1, config.OUTPUT_H - reserve_h)
-                y0 = compute_viewport_y(plan, config.OUTPUT_H, top_h)
 
                 canvas = np.zeros((config.OUTPUT_H, config.OUTPUT_W, 3), dtype=np.uint8)
-                canvas[:top_h, :, :] = full_canvas[y0:y0 + top_h, :, :]
+                canvas[:top_h, :, :] = full_canvas[:top_h, :, :]
 
                 for s in plan.get("slots", []):
                     tid = s.get("track_id")
                     if tid is None:
                         continue
                     sx, sy, sw, sh = s["slot_xywh"]
-                    cy = sy - y0
                     vx0 = max(0, sx)
-                    vy0 = max(0, cy)
+                    vy0 = max(0, sy)
                     vx1 = min(config.OUTPUT_W - 1, sx + sw - 1)
-                    vy1 = min(top_h - 1, cy + sh - 1)
+                    vy1 = min(top_h - 1, sy + sh - 1)
                     if vx1 > vx0 and vy1 > vy0:
                         if speaking_map.get(tid, False):
                             cv.rectangle(canvas, (vx0, vy0), (vx1, vy1), SPEAKER_BORDER_COLOR, BORDER_THICK)
@@ -433,7 +479,6 @@ def setup():
             last_people = 0
             canvas = cv.resize(frame, (config.OUTPUT_W, config.OUTPUT_H))
 
-        # 7. Pano
         if pano_mode == "overlay":
             if speaking_map and pano is not None:
                 pano.notify_activity(any(speaking_map.values()))
@@ -447,16 +492,17 @@ def setup():
             if pano_cfg.enabled:
                 canvas, _ = draw_static_pano_strip(canvas, frame, pano_cfg)
 
-        # 8. ReID debug panel
         tracked_order = tracked_list_from_plan(last_plan)
         prefer_tid = next((tid for tid, v in speaking_map.items() if v), None)
         canvas = draw_reid_debug(canvas, reid, tracked_order, prefer_tid)
 
-        # 9. HUD and present
         dt = time.time() - t0
         fps = 1.0 / max(dt, 1e-3)
         fps_hist = (fps_hist + [fps])[-30:]
-        hud_text = f"People: {people_now}  FPS: {np.mean(fps_hist):.1f}  Mode:{pano_mode}"
+        cam_tag = "DualCam" if use_dual else "SingleCam"
+        hud_text = f"People: {people_now}  FPS: {np.mean(fps_hist):.1f}  {cam_tag}  Mode:{pano_mode}"
+        if use_dual and stitcher.dx is not None:
+            hud_text += f"  dx:{stitcher.dx}"
         if len(cur_ids) > people_now and people_now == min(len(cur_ids), CAP):
             hud_text += "  (capped)"
         hud = canvas.copy()
@@ -495,7 +541,10 @@ def setup():
                     REID_STATE["focus_tid"] = tracked_order[(idx + 1) % len(tracked_order)]
                 REID_STATE["show"] = True
 
-    cap.release()
+    if use_dual and stitcher:
+        stitcher.stop()
+    if cap:
+        cap.release()
     cv.destroyAllWindows()
 
 if __name__ == "__main__":

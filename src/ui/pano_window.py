@@ -1,4 +1,3 @@
-# src/ui/pano_window.py
 from dataclasses import dataclass
 import time
 import cv2 as cv
@@ -15,44 +14,38 @@ class PanoConfig:
     expand_ms: int = 220
     collapse_ms: int = 160
     hover_radius: int = 72
-    auto_hide_sec: float = 2.5       # hold time after mouse leaves (sec)
-    boot_intro_sec: float = 10.0     # boot intro duration before collapsing
+    auto_hide_sec: float = 2.5
+    boot_intro_sec: float = 10.0
     border_px: int = 2
     radius_px: int = 10
-    bg_color: tuple = (24, 24, 24)       # panel background (BGR)
-    border_color: tuple = (64, 64, 64)   # border color (BGR)
-    arrow_color: tuple = (180, 180, 180) # arrow color (BGR)
+    bg_color: tuple = (24, 24, 24)
+    border_color: tuple = (64, 64, 64)
+    arrow_color: tuple = (180, 180, 180)
     shadow: bool = True
 
 
 class PanoWindow:
-    # Collapsible panoramic mini-window showing full camera FOV.
 
     def __init__(self, canvas_w: int, canvas_h: int, cfg: PanoConfig):
         self.cfg = cfg
         self.canvas_w = canvas_w
         self.canvas_h = canvas_h
 
-        # Finite state machine states: collapsed | expanding | expanded | collapsing
         self.state = "collapsed"
         self._t0 = time.time()
         self._p = 0.0
 
-        # Mouse and timing state
         self.mouse_xy = (self.canvas_w // 2, self.canvas_h - 1)
         self._last_mouse_in = False
         self._last_leave_time = time.time()
         self._last_user_expand_time = None
 
-        # Boot intro control
         self._boot_start_time = time.time()
         self._boot_intro_active = True
         self._meeting_started = False
 
-        # Layout
         self._recompute_layouts()
 
-        # Start boot intro expansion if enabled
         if self.cfg.enabled and self.cfg.boot_intro_sec > 0.0:
             self.state = "expanding"
             self._t0 = time.time()
@@ -110,7 +103,6 @@ class PanoWindow:
         self.mouse_xy = (x, y)
 
     def notify_activity(self, any_speaking: bool):
-        # If someone speaks during boot intro, mark meeting started and collapse immediately
         if any_speaking and not self._meeting_started:
             self._meeting_started = True
             self._boot_intro_active = False
@@ -127,7 +119,6 @@ class PanoWindow:
     def _update_state(self):
         now = time.time()
 
-        # Boot intro behavior
         if self._boot_intro_active and not self._meeting_started:
             elapsed = now - self._boot_start_time
             if self.state in ("expanding", "expanded"):
@@ -157,7 +148,6 @@ class PanoWindow:
                     self._boot_intro_active = False
             return
 
-        # Mouse-driven behavior
         near = self._in_proximity()
         if near:
             if self.state in ("collapsed", "collapsing"):
@@ -181,7 +171,6 @@ class PanoWindow:
                 self.state = "collapsing"
                 self._t0 = now
 
-        # Advance animation
         if self.state == "expanding":
             t = min(1.0, (now - self._t0) * 1000.0 / self.cfg.expand_ms)
             self._p = t
@@ -212,20 +201,17 @@ class PanoWindow:
         if not self.cfg.enabled:
             return canvas_bgr
 
-        # Update FSM and ease animation
         self._update_state()
         p = self._p
-        p = p * p * (3 - 2 * p)  # smoothstep easing
+        p = p * p * (3 - 2 * p)
         rect = self.lerp_rect(self.rect_collapsed, self.rect_expanded, p)
         x, y, w, h = rect
 
-        # Draw panel
         if self.cfg.shadow:
             self.draw_shadow(canvas_bgr, rect)
         self.fill_round_rect(canvas_bgr, rect, self.cfg.radius_px, self.cfg.bg_color)
         self.stroke_round_rect(canvas_bgr, rect, self.cfg.radius_px, self.cfg.border_color, self.cfg.border_px)
 
-        # Arrow (up if collapsed-ish, down if expanded-ish)
         arrow_h = self.cfg.collapsed_h
         ay = y + h - arrow_h // 2
         cx = x + w // 2
@@ -236,7 +222,6 @@ class PanoWindow:
         ], dtype=np.int32)
         cv.fillConvexPoly(canvas_bgr, pts, self.cfg.arrow_color)
 
-        # Mini video preview
         if h > arrow_h + 12:
             pad = 8
             inner_w, inner_h = w - 2 * pad, h - arrow_h - 2 * pad

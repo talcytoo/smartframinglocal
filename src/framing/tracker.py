@@ -9,7 +9,6 @@ BBox = Tuple[int, int, int, int]
 
 
 def _iou(a: BBox, b: BBox) -> float:
-    # Intersection-over-Union for two bounding boxes
     ax, ay, aw, ah = a
     bx, by, bw, bh = b
     ax2, ay2 = ax + aw, ay + ah
@@ -27,7 +26,6 @@ def _iou(a: BBox, b: BBox) -> float:
 
 
 def _center_dist(a: BBox, b: BBox) -> float:
-    # Euclidean distance between centers of two boxes
     ax, ay, aw, ah = a
     bx, by, bw, bh = b
     acx, acy = ax + aw * 0.5, ay + ah * 0.5
@@ -46,8 +44,6 @@ class Track:
 
 
 class StableTracker:
-    # IoU-based tracker with optional center-distance gating
-    # Tracks require N hits before confirmation; removed when miss/forget thresholds are exceeded
     def __init__(
         self,
         match_iou_thr: float = 0.3,
@@ -109,18 +105,14 @@ class StableTracker:
         return out
 
     def update(self, dets: List[BBox], frame_bgr: Optional[object] = None) -> List[Optional[int]]:
-        # Update tracker with detections. Returns list of track IDs aligned with dets.
         self.frame_idx += 1
         now = time.time()
 
-        # 1. Age all active tracks
         for tr in self.tracks.values():
             tr.misses += 1
 
-        # 2. Assign detections to existing tracks
         assigned = self._assign_active(dets)
 
-        # 3. Update matched tracks
         for di, db in enumerate(dets):
             tid = assigned[di]
             if tid is None or tid not in self.tracks:
@@ -133,7 +125,6 @@ class StableTracker:
             if not tr.confirmed and tr.hits >= self.enter_confirm:
                 tr.confirmed = True
 
-        # 4. Remove tracks that exceeded miss/forget thresholds
         to_forget = []
         for tid, tr in self.tracks.items():
             miss_limit = self.exit_confirm if tr.confirmed else max(2, self.enter_confirm + 1)
@@ -142,7 +133,6 @@ class StableTracker:
         for tid in to_forget:
             self.tracks.pop(tid, None)
 
-        # 5. Create new tracks for unmatched detections
         for di, db in enumerate(dets):
             if assigned[di] is None:
                 tid = next(self.next_id)

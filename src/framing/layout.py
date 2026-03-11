@@ -22,26 +22,23 @@ def cell_size(out_w: int, out_h: int, rows: int, cols: int) -> Tuple[int, int]:
     return cell_w, cell_h
 
 
-# Portrait bounds helper for uniform look
 def _bounds_11_to_32(cell_w: int, cell_h: int) -> Tuple[int, int, int]:
-    # Compute portrait bounds inside a slot (cell_w × cell_h) for aspect range [1:1 .. 3:2].
-    minH = min(cell_h, cell_w)                       # 1:1 fit
-    ar_32 = 3.0 / 2.0                                # 3:2 aspect ratio
-    maxH = min(cell_h, int(cell_w / ar_32))          # 3:2 fit by height
-    maxW = min(cell_w, int(ar_32 * cell_h))          # 3:2 fit by width
+    minH = min(cell_h, cell_w)
+    ar_32 = 3.0 / 2.0
+    maxH = min(cell_h, int(cell_w / ar_32))
+    maxW = min(cell_w, int(ar_32 * cell_h))
     return int(minH), int(maxH), int(maxW)
 
 
 def compute_target_face_height(dets: List[Dict], cell_h: int, headroom_ratio: float) -> int:
     if not dets:
         return 0
-    min_face = int(min(d["bbox"][3] for d in dets))  # smallest bbox height
+    min_face = int(min(d["bbox"][3] for d in dets))
     max_face = int((1 - headroom_ratio) * cell_h * (1 / 4)) * 4
     return min(min_face, int((5 / 6) * (cell_h / 4)) * 4)
 
 
 def ensure_single_face_crop(src_shape, face_bbox, other_bboxes, face_h, aspect_wh, headroom_ratio, four_h_mult):
-    # Multi-person helper for single-face crop
     H, W = src_shape[:2]
     x, y, w, h = face_bbox
     cx = x + w / 2.0
@@ -57,7 +54,6 @@ def ensure_single_face_crop(src_shape, face_bbox, other_bboxes, face_h, aspect_w
     crop_x1 = int(cx - target_w / 2)
     crop_x2 = crop_x1 + target_w
 
-    # Clamp to image bounds
     dx1 = max(0 - crop_x1, 0)
     dy1 = max(0 - crop_y1, 0)
     dx2 = max(crop_x2 - W, 0)
@@ -72,7 +68,6 @@ def ensure_single_face_crop(src_shape, face_bbox, other_bboxes, face_h, aspect_w
     def center(bb):
         return bb[0] + bb[2] / 2.0, bb[1] + bb[3] / 2.0
 
-    # Avoid intruding faces
     for ob in other_bboxes:
         ocx, ocy = center(ob)
         inside = (crop_x1 <= ocx <= crop_x2) and (crop_y1 <= ocy <= crop_y2)
@@ -88,43 +83,37 @@ def ensure_single_face_crop(src_shape, face_bbox, other_bboxes, face_h, aspect_w
     return crop
 
 
-def _single_person_plan(frame_bgr, det, out_w, out_h, aspect_wh, headroom_ratio):
+def _single_person_plan(frame_bgr, det, out_w, out_h, aspect_wh, headroom_ratio, four_h_mult=4.0):
     H_src, W_src = frame_bgr.shape[:2]
     x, y, w, h = det["bbox"]
     aspect = aspect_wh[0] / aspect_wh[1]
 
-    # Option A: fit by height (pillarbox left/right)
     a_h = out_h
     a_w = int(a_h * aspect)
     a_x = (out_w - a_w) // 2
     a_y = 0
-    area_a = a_w * a_h if a_w <= out_w else -1  # invalidate if overflow
+    area_a = a_w * a_h if a_w <= out_w else -1
 
-    # Option B: fit by width (letterbox top/bottom)
     b_w = out_w
     b_h = int(b_w / aspect)
     b_x = 0
     b_y = (out_h - b_h) // 2
-    area_b = b_w * b_h if b_h <= out_h else -1  # invalidate if overflow
+    area_b = b_w * b_h if b_h <= out_h else -1
 
-    # Choose the one with less black bars (larger area)
     if area_b > area_a:
         dst_w, dst_h, dst_x, dst_y = b_w, b_h, b_x, b_y
     else:
         dst_w, dst_h, dst_x, dst_y = a_w, a_h, a_x, a_y
 
-    # Body-inclusive crop height (same as before)
     H_spec = (6.0 / 5.0) * h
-    crop_h = int(min(4.0 * H_spec, float(H_src)))
+    crop_h = int(min(four_h_mult * H_spec, float(H_src)))
     crop_w = int(crop_h * aspect)
 
-    # Vertical placement with ~1/6 headroom
     headroom = (1.0 / 6.0) * crop_h
     top_head = y
     crop_y1 = int(top_head - headroom)
     crop_y1 = clamp(crop_y1, 0, max(0, H_src - crop_h))
 
-    # Horizontal placement centered on face
     cx = x + 0.5 * w
     crop_x1 = int(cx - 0.5 * crop_w)
     crop_x1 = clamp(crop_x1, 0, max(0, W_src - crop_w))
@@ -144,9 +133,8 @@ def plan_layout_and_crops(frame_bgr, detections: List[Dict], out_size: Tuple[int
     out_w, out_h = out_size
     n = len(detections)
 
-    # Single-person: full portrait with pillarbox
     if n == 1:
-        slot = _single_person_plan(frame_bgr, detections[0], out_w, out_h, aspect_wh, headroom_ratio)
+        slot = _single_person_plan(frame_bgr, detections[0], out_w, out_h, aspect_wh, headroom_ratio, four_h_mult)
         return {
             "rows": 1, "cols": 1,
             "cell_w": out_w, "cell_h": out_h,
@@ -156,7 +144,6 @@ def plan_layout_and_crops(frame_bgr, detections: List[Dict], out_size: Tuple[int
             "out_w": out_w, "out_h": out_h,
         }
 
-    # Multi-person uniform layout
     rows, cols = pick_rows_cols(n, out_w, out_h, one_row_max, rows_hint)
     cell_w, cell_h = cell_size(out_w, out_h, rows, cols)
 
@@ -189,7 +176,7 @@ def plan_layout_and_crops(frame_bgr, detections: List[Dict], out_size: Tuple[int
 
         H0_raw = int(dst_h / max(scale, 1e-6))
         H_min = int((6.0 / 5.0) * h)
-        H_max = int(min((6.0 / 5.0) * 4.0 * h, float(H_src)))
+        H_max = int(min((6.0 / 5.0) * four_h_mult * h, float(H_src)))
         H0 = int(clamp(H0_raw, H_min, H_max))
         W0 = int(min(int(H0 * target_aspect), W_src))
 
@@ -220,7 +207,6 @@ def plan_layout_and_crops(frame_bgr, detections: List[Dict], out_size: Tuple[int
 
 
 def compose_canvas(frame_bgr, plan):
-    # Compose output canvas (handles pillarbox for single-person case)
     H_src, W_src = frame_bgr.shape[:2]
     out_w = plan.get("out_w", plan["cols"] * plan["cell_w"])
     out_h = plan.get("out_h", plan["rows"] * plan["cell_h"])
@@ -256,6 +242,13 @@ def compose_canvas(frame_bgr, plan):
                     roi = roi[off:off + new_h, :]
             patch = cv.resize(roi, (sw, sh), interpolation=cv.INTER_AREA)
 
+        pw, ph = patch.shape[1], patch.shape[0]
+        dy = max(0, (sy + ph) - out_h)
+        dx = max(0, (sx + pw) - out_w)
+        if dy > 0 or dx > 0:
+            patch = patch[:ph - dy, :pw - dx]
+            sh = ph - dy
+            sw = pw - dx
         canvas[sy:sy + sh, sx:sx + sw] = patch
 
         bx, by, bw, bh = slot["bbox"]

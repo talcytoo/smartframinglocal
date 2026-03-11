@@ -10,27 +10,24 @@ from mediapipe import Image, ImageFormat
 
 @dataclass
 class SpeakingState:
-    # Tracks EMA score and speaking state for one track_id
     ema: float = 0.0
     is_speaking: bool = False
     last_ts: float = 0.0
-    cooloff: int = 0  # sustain counter after speaking drops
+    cooloff: int = 0
 
 
 class FaceLandmarkerASD:
-    # Wrapper around MediaPipe Face Landmarker for simple active-speaker detection
-    # Outputs lip-open score [0,1] and debounced speaking boolean per track_id
     def __init__(
         self,
-        model_asset_path: Optional[str] = None,   # None → use default bundled model
-        running_mode: str = "VIDEO",             # IMAGE | VIDEO | LIVE_STREAM
-        max_faces: int = 1,                      # expect 1 face per ROI
+        model_asset_path: Optional[str] = None,
+        running_mode: str = "VIDEO",
+        max_faces: int = 1,
         use_blendshapes: bool = True,
-        ema_alpha: float = 0.55,                 # EMA smoothing factor
-        on_thr: float = 0.35,                    # threshold to switch ON speaking
-        off_thr: float = 0.22,                   # lower threshold to switch OFF
-        sustain_frames: int = 6,                 # sustain speaking N frames after drop
-        lips_fallback: bool = True               # fallback to lip-gap if no blendshapes
+        ema_alpha: float = 0.55,
+        on_thr: float = 0.35,
+        off_thr: float = 0.22,
+        sustain_frames: int = 6,
+        lips_fallback: bool = True
     ):
         BaseOptions = mp_python.BaseOptions
         FaceLandmarker = mp_vision.FaceLandmarker
@@ -61,7 +58,6 @@ class FaceLandmarkerASD:
         self._landmarker = FaceLandmarker.create_from_options(opts)
 
     def _blendshape_jaw_open(self, blendshapes) -> Optional[float]:
-        # Extract jaw/mouth open score from blendshapes
         if not blendshapes:
             return None
         bs = blendshapes[0]
@@ -71,7 +67,6 @@ class FaceLandmarkerASD:
         return None
 
     def _lip_gap_score(self, landmarks) -> Optional[float]:
-        # Compute normalized lip-gap score using landmarks
         if not landmarks:
             return None
         lm = landmarks[0]
@@ -90,7 +85,7 @@ class FaceLandmarkerASD:
             if eye <= 1e-6:
                 return None
 
-            raw = gap / (eye * 0.45)  # empirical eye-to-mouth ratio
+            raw = gap / (eye * 0.45)
             return float(np.clip(raw, 0.0, 1.0))
         except Exception:
             return None
@@ -101,17 +96,14 @@ class FaceLandmarkerASD:
         track_id: int,
         frame_timestamp_ms: Optional[int] = None
     ) -> Tuple[float, bool]:
-        # Returns (lip_open_score in [0,1], is_speaking boolean)
         if bgr_roi is None or bgr_roi.size == 0:
             st = self._states.setdefault(track_id, SpeakingState())
             return st.ema, st.is_speaking
 
-        # Convert ROI to MediaPipe image
         rgb = cv.cvtColor(bgr_roi, cv.COLOR_BGR2RGB)
         mp_image = Image(image_format=ImageFormat.SRGB, data=rgb)
         result = self._landmarker.detect(mp_image)
 
-        # Get score from blendshapes or fallback
         score = None
         if self._use_blend:
             score = self._blendshape_jaw_open(getattr(result, "face_blendshapes", None))
@@ -120,12 +112,10 @@ class FaceLandmarkerASD:
         if score is None:
             score = 0.0
 
-        # Update state for this track
         st = self._states.setdefault(track_id, SpeakingState())
         st.ema = (1.0 - self._ema_alpha) * st.ema + self._ema_alpha * score
 
         if st.is_speaking:
-            # Drop only when below off_thr, with sustain
             if st.ema < self._off_thr:
                 if st.cooloff > 0:
                     st.cooloff -= 1
@@ -134,7 +124,6 @@ class FaceLandmarkerASD:
             else:
                 st.cooloff = self._sustain
         else:
-            # Activate when above on_thr
             if st.ema > self._on_thr:
                 st.is_speaking = True
                 st.cooloff = self._sustain
