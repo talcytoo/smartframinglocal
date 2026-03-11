@@ -1,6 +1,6 @@
-# Smart Portrait Framing
+# Smart Portrait Framing (DTEN Design Proposal)
 
-**Smart Portrait Framing (DTEN Design Proposal)**
+**Version 1.4**
 
 This project involves taking one or several camera feeds and automatically turning them into a clean and organized grid of cropped human portraits. It detects faces, tracks individuals over time, frames each person into a consistent aspect ratio, and highlights active speakers in real-time. This demonstration version is a design proposal demo for DTEN, aiming to facilitate complex in-person group discussions where multiple people share a single device, such as in study groups, classrooms, or conference rooms.
 
