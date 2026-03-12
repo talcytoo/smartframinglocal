@@ -14,7 +14,7 @@ YOLO_DEVICE = "mps"          # "cpu", "cuda", "mps"
 ASPECT_CANDIDATES = [(1,1), (2,3), (3,4)]
 
 # Grid policy
-MAX_VISIBLE_PORTRAITS = 4
+MAX_VISIBLE_PORTRAITS = 8
 ONE_ROW_MAX = 4    # use 1 row up to this many people, else 2 rows
 MIN_FACE_PX = 45    # minimum face height (px) to accept a detection
 
@@ -77,4 +77,3 @@ PANO_BG_COLOR = (24, 24, 24) # Background fill color (BGR)
 PANO_BORDER_COLOR = (64, 64, 64) # Border line color (BGR)
 PANO_ARROW_COLOR = (180, 180, 180) # Color of the collapse/expand arrow (BGR)
 PANO_SHADOW = True           # Whether to render a drop shadow behind the panoramic window
-

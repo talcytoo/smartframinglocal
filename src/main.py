@@ -70,7 +70,10 @@ def build_pano_cfg() -> PanoConfig:
         arrow_color=getattr(config, 'PANO_ARROW_COLOR', (180, 180, 180)),
         shadow=getattr(config, 'PANO_SHADOW', True),
     )
-
+def compute_pano_dims(frame_w: int, frame_h: int) -> tuple:
+    max_pano_w = int(frame_w * 0.3)
+    max_pano_h = int(frame_h * 0.3)
+    return max_pano_w, max_pano_h
 def reid_panel_rect(canvas_h):
     x0 = REID_DEBUG_MARGIN
     y0 = canvas_h - REID_DEBUG_PANEL_H - REID_DEBUG_MARGIN
@@ -263,6 +266,7 @@ def setup():
     frame_idx = 0
     aspect_idx = 1
     use_rows_hint = None
+    pano_dims_adjusted = False
 
     while True:
         t0 = time.time()
@@ -277,6 +281,13 @@ def setup():
                 break
             time.sleep(0.005)
             continue
+
+        if not pano_dims_adjusted and frame is not None:
+            H, W = frame.shape[:2]
+            pano_w, pano_h = compute_pano_dims(W, H)
+            pano_cfg.width = pano_w
+            pano_cfg.height = pano_h
+            pano_dims_adjusted = True
 
         detections = detector.detect(frame)
 
